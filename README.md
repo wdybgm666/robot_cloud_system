@@ -1,6 +1,6 @@
-# 机器人云控系统 - Web端地图显示
+# 机器人云控系统 - Web端地图显示与导航
 
-本项目是一个基于Web的机器人云控制系统，可以实现对机器人的远程监控与操作。本文档将详细介绍如何运行项目以查看地图数据，以及地图数据的来源和传输过程。
+本项目是一个基于Web的机器人云控制系统，可以实现对机器人的远程监控与操作。本文档将详细介绍如何运行项目以查看地图数据和使用导航功能，以及地图数据的来源和传输过程。
 
 ## 项目概述
 
@@ -47,6 +47,24 @@ python test_map_publisher.py
 #### 方式二：使用真实ROS数据
 
 如果您有运行中的ROS 2系统并发布了地图数据到`/map`话题，系统将自动显示这些数据。
+
+### 4. 使用导航功能
+
+导航功能支持两种模式：
+
+#### 模式一：使用测试导航服务器
+
+运行测试导航服务器来模拟机器人导航：
+
+```bash
+python test_navigation_server.py
+```
+
+#### 模式二：使用真实ROS导航栈
+
+如果您有运行中的ROS 2导航系统，系统将自动与之交互。
+
+在浏览器中访问 `http://localhost:5000`，切换到"地图与导航"标签页，输入目标点坐标并点击"设置目标点"按钮即可开始导航。
 
 ## 地图数据流程说明
 
@@ -106,12 +124,44 @@ int8[] data             # 网格占用数据
 
 3. 将临时Canvas的内容缩放并绘制到主Canvas上进行显示
 
+## 导航功能说明
+
+### 1. 导航架构
+
+导航功能基于ROS 2的Navigation Stack实现，使用`NavigateToPose` Action接口进行通信。
+
+### 2. 导航数据流
+
+```
+Web界面 → WebSocket服务器 → ROS 2 Action客户端 → 导航服务器
+   ↓             ↓                ↓                  ↓
+用户输入      app.py        NavigateToPose      nav2/测试服务器
+```
+
+详细步骤：
+1. 用户在Web界面输入目标点坐标并点击"设置目标点"
+2. 前端JavaScript通过WebSocket将目标点发送到后端
+3. 后端`app.py`中的`WebNode`类接收目标点并创建`NavigateToPose` Action请求
+4. Action客户端将请求发送到导航服务器（真实nav2或测试服务器）
+5. 导航服务器执行路径规划并避开障碍物，定期发送反馈
+6. 后端接收反馈并通过WebSocket发送给前端
+7. 前端实时显示机器人位置更新
+
+### 3. 路径规划
+
+测试导航服务器实现了基于A*算法的路径规划，能够：
+- 订阅并使用实际地图数据
+- 识别障碍物并避开它们
+- 计算从当前位置到目标位置的最优路径
+- 模拟机器人沿着路径移动
+
 ## 项目结构
 
 ```
 robot_cloud_system/
 ├── app.py                 # 主应用文件
 ├── test_map_publisher.py   # 测试地图发布器
+├── test_navigation_server.py # 测试导航服务器
 ├── templates/
 │   └── index.html         # 主页面模板
 ├── static/
@@ -119,6 +169,7 @@ robot_cloud_system/
 │       ├── map_navigation.js      # 主界面地图导航系统
 │       └── map_navigation_test.js # 旧版地图导航系统
 ├── map_debug.html         # 地图调试页面
+├── NAVIGATION_DEVELOPMENT_LOG.md # 导航功能开发日志
 └── README.md              # 本说明文件
 ```
 
@@ -143,12 +194,25 @@ robot_cloud_system/
 - 确认地图数据格式是否符合预期
 - 查看浏览器开发者工具中的网络面板，确认数据是否正确传输
 
+### 3. 导航功能无法工作
+
+- 确保 `test_navigation_server.py` 正在运行（用于测试）或ROS导航系统正在运行
+- 检查浏览器控制台是否有JavaScript错误
+- 确认WebSocket连接是否正常
+- 查看后端日志确认导航目标是否正确接收
+
 ## 扩展开发
 
 如需扩展地图功能，可参考以下文件：
 - `app.py` - 后端数据处理和WebSocket通信
 - `static/js/map_navigation.js` - 前端地图渲染和交互
 - `test_map_publisher.py` - 地图数据生成示例
+- `test_navigation_server.py` - 导航功能实现示例
+
+如需扩展导航功能，可参考以下文件：
+- `app.py` - 后端导航Action客户端实现
+- `test_navigation_server.py` - 导航服务器实现和路径规划算法
+- `static/js/map_navigation.js` - 前端导航交互实现
 
 ## 许可证
 
