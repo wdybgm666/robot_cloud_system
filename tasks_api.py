@@ -7,6 +7,45 @@ from task_state_machine import task_state_machine
 tasks_bp = Blueprint('tasks', __name__)
 
 
+@tasks_bp.route('/tasks/execute_all', methods=['POST'])
+def execute_all_tasks():
+    try:
+        conn = sqlite3.connect('tasks.db')
+        c = conn.cursor()
+        now = datetime.now().isoformat()
+        c.execute("""
+            SELECT id FROM tasks 
+            WHERE status = 'pending'
+            ORDER BY CASE priority 
+                WHEN 'high' THEN 3 
+                WHEN 'medium' THEN 2 
+                WHEN 'low' THEN 1 
+                ELSE 0 END DESC, created_at ASC
+        """)
+        pending_ids = [row[0] for row in c.fetchall()]
+        executed = 0
+        for task_id in pending_ids:
+            is_valid, err = task_state_machine.validate_transition(task_id, 'in_progress', conn)
+            if not is_valid:
+                continue
+            c.execute('UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?',
+                      ('in_progress', now, task_id))
+            c.execute('''INSERT INTO task_status_history (task_id, status, timestamp, message)
+                         VALUES (?, ?, ?, ?)''',
+                      (task_id, 'in_progress', now, '批量执行：开始任务'))
+            c.execute('UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?',
+                      ('completed', now, task_id))
+            c.execute('''INSERT INTO task_status_history (task_id, status, timestamp, message)
+                         VALUES (?, ?, ?, ?)''',
+                      (task_id, 'completed', now, '批量执行：任务完成'))
+            executed += 1
+        conn.commit()
+        conn.close()
+        return jsonify({'executed': executed})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @tasks_bp.route('/tasks', methods=['GET'])
 def get_tasks():
     """获取任务列表"""
@@ -244,6 +283,17 @@ def update_task_status(task_id):
         
         # 验证状态转换
         conn = sqlite3.connect('tasks.db')
+        # 获取当前状态用于额外验证
+        c = conn.cursor()
+        c.execute('SELECT status FROM tasks WHERE id = ?', (task_id,))
+        row = c.fetchone()
+        current_status = row[0] if row else None
+
+        # 验证状态转换（特别处理 in_progress -> completed）
+        if new_status == 'completed' and current_status != 'in_progress':
+            conn.close()
+            return jsonify({'error': '只有进行中的任务可以标记为完成'}), 400
+
         is_valid, error_msg = task_state_machine.validate_transition(task_id, new_status, conn)
         
         if not is_valid:
